@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-Time Collaborative Whiteboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            touch-action: none; /* Prevents scrolling on touch devices when drawing */
+        }
+        canvas {
+            cursor: crosshair;
+        }
+        .tool-btn.active {
+            background-color: #3b82f6; /* blue-500 */
+            color: white;
+            box-shadow: 0 0 0 2px white, 0 0 0 4px #3b82f6;
+        }
+        /* Hide scrollbar for modal content */
+        .modal-content::-webkit-scrollbar {
+            display: none;
+        }
+        .modal-content {
+            -ms-overflow-style: none;  /* IE and Edge */
+            scrollbar-width: none;  /* Firefox */
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex flex-col h-screen overflow-hidden">
+
+    <!-- Header: Time and Info -->
+    <header class="bg-white shadow-md p-2 text-center z-20 relative">
+        <h1 class="text-xl font-bold text-gray-800">Collaborative Whiteboard</h1>
+        <p class="text-sm text-gray-600">
+            Current time in Almaty: <span id="almaty-time" class="font-semibold">--:--:--</span>
+        </p>
+        <p class="text-xs text-red-500">
+            Board erases in: <span id="countdown" class="font-semibold">--:--:--</span>
+        </p>
+    </header>
+
+    <!-- Main Content: Canvas and Tools -->
+    <main class="flex-grow relative">
+        <!-- Canvas for drawing -->
+        <canvas id="whiteboard" class="absolute top-0 left-0 w-full h-full bg-white z-0"></canvas>
+        <!-- Canvas for cursors, sits on top -->
+        <canvas id="cursor-canvas" class="absolute top-0 left-0 w-full h-full pointer-events-none z-10"></canvas>
+        
+        <!-- Toolbar -->
+        <div id="toolbar" class="absolute top-4 left-4 flex flex-col gap-2 bg-white p-2 rounded-lg shadow-lg border z-20">
+            <button id="pencil-btn" class="tool-btn active p-2 rounded-md hover:bg-gray-200 transition-colors" title="Pencil">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
+            </button>
+            <button id="eraser-btn" class="tool-btn p-2 rounded-md hover:bg-gray-200 transition-colors" title="Eraser">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.18 10.3-4.22-4.22a2 2 0 0 0-2.82 0L2.31 17.93a2 2 0 0 0 0 2.82l4.22 4.22a2 2 0 0 0 2.82 0l11.83-11.83a2 2 0 0 0 0-2.82z"></path><path d="m18 5-4.22 4.22"></path><path d="m7.88 16.12 4.22-4.22"></path></svg>
+            </button>
+            <button id="dropper-btn" class="tool-btn p-2 rounded-md hover:bg-gray-200 transition-colors" title="Color Dropper">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 2.69 5.66 5.66a8 8 0 1 1-11.31 0L12 2.69z"></path></svg>
+            </button>
+            <hr>
+            <button id="undo-btn" class="tool-btn p-2 rounded-md hover:bg-gray-200 transition-colors" title="Undo">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6"></path><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"></path></svg>
+            </button>
+            <button id="redo-btn" class="tool-btn p-2 rounded-md hover:bg-gray-200 transition-colors" title="Redo">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 7v6h-6"></path><path d="M3 17a9 9 0 0 0 9 9 9 9 0 0 0 6-2.3L21 13"></path></svg>
+            </button>
+            <hr>
+             <input type="color" id="color-picker" class="w-10 h-10 p-1 border-0 rounded-md cursor-pointer" title="Color Picker" value="#000000">
+             <div class="flex flex-col items-center">
+                <label for="size-slider" class="text-xs">Size</label>
+                <input type="range" id="size-slider" min="1" max="50" value="5" class="w-20" title="Brush Size">
+             </div>
+        </div>
+
+        <!-- Buttons -->
+        <div class="absolute bottom-4 right-4 flex flex-col items-end gap-2 z-20">
+            <button id="previous-boards-btn" class="bg-gray-700 hover:bg-gray-900 text-white font-bold py-2 px-4 rounded-lg shadow-lg transition-transform transform hover:scale-105">
+                View Past Boards
+            </button>
+            <button id="download-btn" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg shadow-lg transition-transform transform hover:scale-105">
+                Download Today's PNG
+            </button>
+        </div>
+    </main>
+
+    <!-- Previous Boards Modal -->
+    <div id="previous-boards-modal" class="hidden fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4">
+        <div class="bg-white rounded-lg shadow-2xl w-full max-w-4xl h-full max-h-[90vh] flex flex-col">
+            <div class="p-4 border-b flex justify-between items-center">
+                <h2 class="text-2xl font-bold">Previously Saved Boards</h2>
+                <button id="close-modal-btn" class="text-3xl font-light leading-none">&times;</button>
+            </div>
+            <div class="flex flex-grow overflow-hidden">
+                <div class="w-1/4 border-r p-2 overflow-y-auto modal-content">
+                    <h3 class="font-semibold mb-2">Available Dates</h3>
+                    <ul id="board-dates-list" class="space-y-1">
+                        <!-- Dates will be populated here -->
+                    </ul>
+                </div>
+                <div class="w-3/4 p-4 flex items-center justify-center bg-gray-100">
+                    <canvas id="previous-board-canvas" class="max-w-full max-h-full"></canvas>
+                    <p id="no-board-selected" class="text-gray-500">Select a date to view a board.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <script type="module">
+        // --- Firebase SDK Imports ---
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, onSnapshot, query, serverTimestamp, doc, updateDoc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getStorage, ref, listAll, getBlob } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-storage.js";
+
+        // --- Firebase Configuration ---
+        const firebaseConfig = {
+  apiKey: "AIzaSyAsWvL3G607sa0igxV3ZQwElqR9GRUY5xc",
+  authDomain: "monetization-board.firebaseapp.com",
+  projectId: "monetization-board",
+  storageBucket: "monetization-board.firebasestorage.app",
+  messagingSenderId: "500162021745",
+  appId: "1:500162021745:web:bf31a455ebc1b3089b4ed0",
+  measurementId: "G-YCHCJ1RT44"
+        };
+        
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-collaborative-whiteboard';
+
+        let db, auth, storage, userId;
+        const userColor = '#' + Math.floor(Math.random()*16777215).toString(16).padStart(6, '0');
+        try {
+            const app = initializeApp(firebaseConfig);
+            db = getFirestore(app);
+            auth = getAuth(app);
+            storage = getStorage(app);
+        } catch (e) {
+            console.error("Firebase initialization failed. Please provide your Firebase config.", e);
+            alert("Firebase is not configured. Please add your project configuration to the script to enable real-time collaboration.");
+        }
+
+        // --- Canvas Setup ---
+        const canvas = document.getElementById('whiteboard');
+        const ctx = canvas.getContext('2d');
+        const cursorCanvas = document.getElementById('cursor-canvas');
+        const cursorCtx = cursorCanvas.getContext('2d');
+        let isDrawing = false;
+        let lastX = 0, lastY = 0;
+        let currentPath = [];
+        let tool = 'pencil', strokeColor = '#000000', strokeWidth = 5;
+
+        // --- Tool & Control Elements ---
+        const pencilBtn = document.getElementById('pencil-btn'), eraserBtn = document.getElementById('eraser-btn'), dropperBtn = document.getElementById('dropper-btn'), undoBtn = document.getElementById('undo-btn'), redoBtn = document.getElementById('redo-btn'), colorPicker = document.getElementById('color-picker'), sizeSlider = document.getElementById('size-slider'), downloadBtn = document.getElementById('download-btn');
+        
+        // --- Modal Elements ---
+        const previousBoardsBtn = document.getElementById('previous-boards-btn');
+        const modal = document.getElementById('previous-boards-modal');
+        const closeModalBtn = document.getElementById('close-modal-btn');
+        const boardDatesList = document.getElementById('board-dates-list');
+        const prevBoardCanvas = document.getElementById('previous-board-canvas');
+        const prevBoardCtx = prevBoardCanvas.getContext('2d');
+        const noBoardSelectedText = document.getElementById('no-board-selected');
+
+
+        // --- Canvas Resizing ---
+        function resizeAllCanvases() {
+            const dpr = window.devicePixelRatio || 1;
+            const rect = canvas.getBoundingClientRect();
+            [canvas, cursorCanvas].forEach(c => {
+                c.width = rect.width * dpr;
+                c.height = rect.height * dpr;
+                c.getContext('2d').scale(dpr, dpr);
+            });
+            redrawAllFromCache(); 
+        }
+
+        let drawingCache = [];
+        function redrawAllFromCache() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawingCache
+                .filter(action => !action.undone)
+                .forEach(action => drawActionOnCanvas(ctx, action));
+        }
+
+        window.addEventListener('resize', resizeAllCanvases);
+
+        // --- Drawing Logic ---
+        const getMousePos = (evt, c = canvas) => { const rect = c.getBoundingClientRect(); return { x: evt.clientX - rect.left, y: evt.clientY - rect.top }; }
+        const getTouchPos = (evt, c = canvas) => { const rect = c.getBoundingClientRect(); return { x: evt.touches[0].clientX - rect.left, y: evt.touches[0].clientY - rect.top }; }
+
+        function startDrawing(e) {
+            if (tool === 'dropper') return;
+            isDrawing = true;
+            const pos = e.touches ? getTouchPos(e) : getMousePos(e);
+            [lastX, lastY] = [pos.x, pos.y];
+            currentPath = [{ x: lastX, y: lastY }];
+        }
+
+        function draw(e) {
+            if (!isDrawing) return;
+            e.preventDefault();
+            const pos = e.touches ? getTouchPos(e) : getMousePos(e);
+            const color = tool === 'eraser' ? '#FFFFFF' : strokeColor;
+            drawActionOnCanvas(ctx, { path: [{x: lastX, y: lastY}, {x: pos.x, y: pos.y}], color, width: strokeWidth});
+            [lastX, lastY] = [pos.x, pos.y];
+            currentPath.push({ x: lastX, y: lastY });
+        }
+
+        async function stopDrawing() {
+            if (!isDrawing || currentPath.length < 2) {
+                isDrawing = false; currentPath = []; return;
+            }
+            isDrawing = false;
+            const action = { tool, color: tool === 'eraser' ? '#FFFFFF' : strokeColor, width: strokeWidth, path: currentPath, userId, undone: false, timestamp: serverTimestamp() };
+            if (db) try { await addDoc(collection(db, `artifacts/${appId}/public/data/drawingActions`), action); } catch (e) { console.error("Error adding doc:", e); }
+            currentPath = [];
+        }
+
+        // --- Event Listeners ---
+        canvas.addEventListener('mousedown', startDrawing);
+        canvas.addEventListener('mousemove', draw);
+        canvas.addEventListener('mouseup', stopDrawing);
+        canvas.addEventListener('mouseout', stopDrawing);
+        canvas.addEventListener('touchstart', startDrawing);
+        canvas.addEventListener('touchmove', draw);
+        canvas.addEventListener('touchend', stopDrawing);
+        canvas.addEventListener('click', pickColor);
+
+        // --- Tool Selection & UI ---
+        function setActiveTool(selectedTool) {
+            [pencilBtn, eraserBtn, dropperBtn].forEach(btn => btn.classList.remove('active'));
+            const toolMap = { pencil: pencilBtn, eraser: eraserBtn, dropper: dropperBtn };
+            const cursorMap = { pencil: 'crosshair', eraser: 'crosshair', dropper: 'copy' };
+            if (toolMap[selectedTool]) toolMap[selectedTool].classList.add('active');
+            canvas.style.cursor = cursorMap[selectedTool] || 'crosshair';
+            tool = selectedTool;
+        }
+        pencilBtn.addEventListener('click', () => setActiveTool('pencil'));
+        eraserBtn.addEventListener('click', () => setActiveTool('eraser'));
+        dropperBtn.addEventListener('click', () => setActiveTool('dropper'));
+        colorPicker.addEventListener('input', (e) => strokeColor = e.target.value);
+        sizeSlider.addEventListener('input', (e) => strokeWidth = e.target.value);
+        downloadBtn.addEventListener('click', () => {
+            const dataUrl = canvas.toDataURL('image/png');
+            const link = document.createElement('a');
+            link.download = `whiteboard-${new Date().toISOString().split('T')[0]}.png`;
+            link.href = dataUrl;
+            link.click();
+        });
+
+        // --- Color Dropper Logic ---
+        function pickColor(e) {
+            if (tool !== 'dropper') return;
+            const dpr = window.devicePixelRatio || 1;
+            const pos = getMousePos(e);
+            const pixel = ctx.getImageData(pos.x * dpr, pos.y * dpr, 1, 1).data;
+            strokeColor = colorPicker.value = `#${((1 << 24) + (pixel[0] << 16) + (pixel[1] << 8) + pixel[2]).toString(16).slice(1)}`;
+            setActiveTool('pencil');
+        }
+        
+        // --- Undo/Redo Logic ---
+        async function toggleLastActionState(targetState) {
+            if (!db || !userId) return;
+            const userActions = drawingCache
+                .filter(action => action.userId === userId && action.undone !== targetState)
+                .sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
+            if (userActions.length > 0) {
+                const actionRef = doc(db, `artifacts/${appId}/public/data/drawingActions`, userActions[0].id);
+                try { await updateDoc(actionRef, { undone: targetState }); } catch (e) { console.error("Error toggling state:", e); }
+            }
+        }
+        undoBtn.addEventListener('click', () => toggleLastActionState(true));
+        redoBtn.addEventListener('click', () => toggleLastActionState(false));
+
+        // --- Real-Time Cursors ---
+        let cursors = {};
+        const updateCursorPosition = (e) => {
+            if (!userId) return;
+            const pos = getMousePos(e);
+            const cursorRef = doc(db, `artifacts/${appId}/public/data/cursors`, userId);
+            setDoc(cursorRef, { x: pos.x, y: pos.y, color: userColor, lastSeen: serverTimestamp() });
+        };
+        canvas.addEventListener('mousemove', updateCursorPosition);
+        
+        function cursorAnimationLoop() {
+            cursorCtx.clearRect(0, 0, cursorCanvas.width, cursorCanvas.height);
+            for (const id in cursors) {
+                if (id !== userId) {
+                    const cursor = cursors[id];
+                    cursorCtx.beginPath();
+                    cursorCtx.arc(cursor.x, cursor.y, 5, 0, 2 * Math.PI, false);
+                    cursorCtx.fillStyle = cursor.color;
+                    cursorCtx.fill();
+                    cursorCtx.font = '12px Inter';
+                    cursorCtx.fillText(id.substring(0, 6), cursor.x + 10, cursor.y + 5);
+                }
+            }
+            requestAnimationFrame(cursorAnimationLoop);
+        }
+
+        // --- Previous Boards Modal Logic ---
+        previousBoardsBtn.addEventListener('click', async () => {
+            modal.classList.remove('hidden');
+            noBoardSelectedText.classList.remove('hidden');
+            prevBoardCanvas.classList.add('hidden');
+            boardDatesList.innerHTML = '<li>Loading...</li>';
+            
+            const listRef = ref(storage, `artifacts/${appId}/previous_boards`);
+            try {
+                const res = await listAll(listRef);
+                boardDatesList.innerHTML = '';
+                if(res.items.length === 0) {
+                     boardDatesList.innerHTML = '<li>No saved boards found.</li>';
+                }
+                res.items.sort((a, b) => b.name.localeCompare(a.name)).forEach(itemRef => {
+                    const date = itemRef.name.replace('.json', '');
+                    const li = document.createElement('li');
+                    li.textContent = date;
+                    li.className = 'p-2 rounded cursor-pointer hover:bg-gray-200';
+                    li.onclick = () => loadPreviousBoard(itemRef);
+                    boardDatesList.appendChild(li);
+                });
+            } catch (error) {
+                console.error("Error listing boards:", error);
+                boardDatesList.innerHTML = '<li>Error loading boards.</li>';
+            }
+        });
+        closeModalBtn.addEventListener('click', () => modal.classList.add('hidden'));
+
+        async function loadPreviousBoard(itemRef) {
+            try {
+                const blob = await getBlob(itemRef);
+                const text = await blob.text();
+                const actions = JSON.parse(text);
+
+                noBoardSelectedText.classList.add('hidden');
+                prevBoardCanvas.classList.remove('hidden');
+
+                const dpr = window.devicePixelRatio || 1;
+                const rect = prevBoardCanvas.parentElement.getBoundingClientRect();
+                prevBoardCanvas.width = rect.width * dpr;
+                prevBoardCanvas.height = rect.height * dpr;
+                prevBoardCtx.scale(dpr, dpr);
+                
+                prevBoardCtx.fillStyle = 'white';
+                prevBoardCtx.fillRect(0,0, prevBoardCanvas.width, prevBoardCanvas.height);
+                
+                actions.forEach(action => drawActionOnCanvas(prevBoardCtx, action));
+            } catch (error) {
+                console.error("Error loading board:", error);
+            }
+        }
+        
+        // --- Firestore Real-Time Sync & Master Drawing Function ---
+        function drawActionOnCanvas(targetCtx, action) {
+            if (!action || !action.path || action.path.length < 1) return;
+            targetCtx.beginPath();
+            targetCtx.moveTo(action.path[0].x, action.path[0].y);
+            for (let i = 1; i < action.path.length; i++) {
+                targetCtx.lineTo(action.path[i].x, action.path[i].y);
+            }
+            targetCtx.strokeStyle = action.color;
+            targetCtx.lineWidth = action.width;
+            targetCtx.lineCap = 'round';
+            targetCtx.lineJoin = 'round';
+            targetCtx.stroke();
+        }
+
+        async function setupFirestoreListeners() {
+            if (!db) return;
+            await signInAnonymously(auth);
+            
+            onAuthStateChanged(auth, user => {
+                if (user) { 
+                    userId = user.uid; 
+                    // Set up disconnection logic
+                    const cursorRef = doc(db, `artifacts/${appId}/public/data/cursors`, userId);
+                    window.addEventListener('beforeunload', () => deleteDoc(cursorRef));
+                }
+            });
+            
+            // Listener for drawings
+            const drawingQuery = query(collection(db, `artifacts/${appId}/public/data/drawingActions`));
+            onSnapshot(drawingQuery, (snapshot) => {
+                drawingCache = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                drawingCache.sort((a,b) => (a.timestamp?.seconds || 0) - (b.timestamp?.seconds || 0));
+                redrawAllFromCache();
+            });
+
+            // Listener for cursors
+            const cursorQuery = query(collection(db, `artifacts/${appId}/public/data/cursors`));
+            onSnapshot(cursorQuery, (snapshot) => {
+                const now = Date.now();
+                snapshot.docs.forEach(doc => {
+                    const data = doc.data();
+                    // Remove cursor if not seen for 15 seconds
+                    if(data.lastSeen && (now - data.lastSeen.toMillis()) < 15000) {
+                        cursors[doc.id] = data;
+                    } else {
+                        delete cursors[doc.id];
+                        deleteDoc(doc.ref); // Clean up old cursors
+                    }
+                });
+            });
+        }
+        
+        // --- Almaty Time and Countdown ---
+        const almatyTimeEl = document.getElementById('almaty-time');
+        const countdownEl = document.getElementById('countdown');
+        function updateTime() {
+            const almatyTime = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Almaty' }));
+            almatyTimeEl.textContent = almatyTime.toLocaleTimeString('en-GB');
+            const tomorrowAt6AM = new Date(almatyTime);
+            tomorrowAt6AM.setHours(6, 0, 0, 0);
+            if (almatyTime.getHours() >= 6) tomorrowAt6AM.setDate(tomorrowAt6AM.getDate() + 1);
+            const diff = tomorrowAt6AM - almatyTime;
+            const h = String(Math.floor(diff / 36e5)).padStart(2, '0');
+            const m = String(Math.floor((diff % 36e5) / 6e4)).padStart(2, '0');
+            const s = String(Math.floor((diff % 6e4) / 1000)).padStart(2, '0');
+            countdownEl.textContent = `${h}:${m}:${s}`;
+        }
+
+        // --- Initial Load ---
+        window.onload = () => {
+            resizeAllCanvases();
+            if (db) {
+                setupFirestoreListeners();
+                requestAnimationFrame(cursorAnimationLoop);
+            }
+            setInterval(updateTime, 1000);
+            updateTime();
+        };
+
+    </script>
+</body>
+</html>
+
