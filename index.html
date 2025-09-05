@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Monetization Whiteboard</title>
+    <title>Collaborative Whiteboard</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -36,9 +36,9 @@
     <div class="relative w-screen h-screen flex flex-col">
         <!-- Header -->
         <header class="bg-white shadow-md p-3 flex justify-between items-center z-20">
-            <h1 class="text-xl md:text-2xl font-bold text-gray-800">Monetization Whiteboard</h1>
+            <h1 class="text-xl md:text-2xl font-bold text-gray-800">Collaborative Whiteboard</h1>
             <div class="text-right">
-                <p class="font-semibold text-gray-700">Next reset in:</p>
+                <p class="font-semibold text-gray-700">Next wipe in:</p>
                 <p id="countdown-timer" class="text-lg font-mono text-blue-600">--:--:--</p>
             </div>
         </header>
@@ -186,11 +186,19 @@
             drawCanvas(); // Redraw canvas content after resize
         };
 
+        // Draws the entire canvas from scratch based on the local cache.
+        // Used for initialization, resizing, and complex updates like undo/redo.
         const drawCanvas = () => {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             const visibleActions = allDrawingActions.filter(action => !action.undone);
             
-            visibleActions.forEach(action => {
+            visibleActions.forEach(drawActionSegment);
+        };
+
+        // OPTIMIZATION: Draws only a single line segment on the canvas without clearing.
+        // This is much faster for real-time updates.
+        const drawActionSegment = (action) => {
+            if (!action.undone) {
                 ctx.beginPath();
                 ctx.moveTo(action.startX, action.startY);
                 ctx.lineTo(action.endX, action.endY);
@@ -199,7 +207,7 @@
                 ctx.lineCap = 'round';
                 ctx.lineJoin = 'round';
                 ctx.stroke();
-            });
+            }
         };
         
         const updateCursorPreview = () => {
@@ -227,7 +235,7 @@
                 timestamp: Date.now(),
                 userId: userId,
                 undone: false,
-                strokeId: currentStrokeId, // Add the stroke ID to group segments
+                strokeId: currentStrokeId,
             };
 
             addDoc(drawingActionsRef, action);
@@ -250,19 +258,16 @@
         const handleUndo = async () => {
             if (!userId) return;
             
-            // Find the last visible action segment for the current user to identify the stroke
             const userActions = allDrawingActions
                 .filter(action => action.userId === userId && !action.undone)
                 .sort((a, b) => b.timestamp - a.timestamp);
 
             if (userActions.length > 0) {
                 const lastStrokeId = userActions[0].strokeId;
-                if (!lastStrokeId) return; // Should not happen with new code
+                if (!lastStrokeId) return;
 
-                // Find all segments belonging to that stroke
                 const actionsToUndo = allDrawingActions.filter(action => action.strokeId === lastStrokeId);
 
-                // Use a batch write to update all segments of the stroke at once
                 const batch = writeBatch(db);
                 actionsToUndo.forEach(action => {
                     const docRef = doc(db, `artifacts/${appId}/public/data/drawingActions`, action.id);
@@ -275,7 +280,6 @@
         const handleRedo = async () => {
             if (!userId) return;
             
-            // Find the most recently undone action to identify the stroke to redo
             const undoneUserActions = allDrawingActions
                 .filter(action => action.userId === userId && action.undone)
                 .sort((a, b) => b.timestamp - a.timestamp);
@@ -284,10 +288,8 @@
                 const strokeToRedoId = undoneUserActions[0].strokeId;
                 if (!strokeToRedoId) return;
 
-                // Find all segments belonging to that stroke
                 const actionsToRedo = allDrawingActions.filter(action => action.strokeId === strokeToRedoId);
 
-                // Use a batch write to update all segments at once
                 const batch = writeBatch(db);
                 actionsToRedo.forEach(action => {
                     const docRef = doc(db, `artifacts/${appId}/public/data/drawingActions`, action.id);
@@ -500,12 +502,32 @@
             if (user) {
                 userId = user.uid;
                 // Subscribe to drawing actions
+                let isInitialLoad = true;
                 onSnapshot(query(drawingActionsRef, orderBy("timestamp")), (snapshot) => {
-                    allDrawingActions = [];
-                    snapshot.forEach(doc => {
-                        allDrawingActions.push({ id: doc.id, ...doc.data() });
-                    });
-                    drawCanvas();
+                    if (isInitialLoad) {
+                        allDrawingActions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                        drawCanvas();
+                        isInitialLoad = false;
+                    } else {
+                        snapshot.docChanges().forEach((change) => {
+                            const actionData = { id: change.doc.id, ...change.doc.data() };
+                            if (change.type === "added") {
+                                allDrawingActions.push(actionData);
+                                drawActionSegment(actionData);
+                            }
+                            if (change.type === "modified") {
+                                const index = allDrawingActions.findIndex(a => a.id === actionData.id);
+                                if (index > -1) {
+                                    allDrawingActions[index] = actionData;
+                                }
+                                drawCanvas(); // Full redraw for modifications (undo/redo)
+                            }
+                            if (change.type === "removed") {
+                                allDrawingActions = allDrawingActions.filter(a => a.id !== actionData.id);
+                                drawCanvas(); // Full redraw for removals
+                            }
+                        });
+                    }
                 });
             } else {
                 await signInAnonymously(auth);
