@@ -498,6 +498,15 @@
 
         // --- Initialization ---
         
+        // OPTIMIZATION: Debounce redraws for complex operations like undo/redo
+        let redrawTimeout;
+        const debouncedRedraw = () => {
+            // If a redraw is already scheduled, cancel it
+            clearTimeout(redrawTimeout);
+            // Schedule a new redraw in 50ms
+            redrawTimeout = setTimeout(drawCanvas, 50);
+        };
+        
         onAuthStateChanged(auth, async (user) => {
             if (user) {
                 userId = user.uid;
@@ -520,11 +529,13 @@
                                 if (index > -1) {
                                     allDrawingActions[index] = actionData;
                                 }
-                                drawCanvas(); // Full redraw for modifications (undo/redo)
+                                // Use the debounced redraw to prevent lag
+                                debouncedRedraw();
                             }
                             if (change.type === "removed") {
                                 allDrawingActions = allDrawingActions.filter(a => a.id !== actionData.id);
-                                drawCanvas(); // Full redraw for removals
+                                 // Use the debounced redraw for removals as well
+                                debouncedRedraw();
                             }
                         });
                     }
